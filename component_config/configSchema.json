@@ -1,17 +1,21 @@
 {
   "type": "object",
-  "title": "extractor configuration",
+  "title": "Parameters",
   "required": [
-    "print_hello"
+    "#api_token",
+    "page_id"
   ],
   "properties": {
-    "print_hello": {
-      "type": "boolean",
-      "title": "Print Hello"
+    "#api_token": {
+      "type": "string",
+      "title": "Authorization Token",
+      "format": "password",
+      "propertyOrder": 1
     },
-    "debug": {
-      "type": "boolean",
-      "title": "Debug"
+    "page_id": {
+      "type": "string",
+      "title": "Facebook Page ID",
+      "propertyOrder": 2
     }
   }
 }
