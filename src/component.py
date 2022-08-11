@@ -5,9 +5,6 @@ Template Component main class.
 import csv
 import logging
 import facebook
-import json
-import sys
-from datetime import datetime
 
 from keboola.component.base import ComponentBase
 from keboola.component.exceptions import UserException
@@ -47,6 +44,7 @@ CSV_FIELDS = [
     "in_reply_to"
 ]
 
+
 class Component(ComponentBase):
     def __init__(self):
         super().__init__()
@@ -69,10 +67,13 @@ class Component(ComponentBase):
                 version="2.12"
             ).get_object(
                 '/%s/posts' % (self.params[KEY_PAGE_ID]),
-                fields="id,created_time,message,permalink_url,"
+                fields=(
+                    "id,created_time,message,permalink_url,"
                     "insights.metric(post_reactions_by_type_total).period(lifetime)"
                     ".as(post_reactions_by_type_total),shares,full_picture"
-        ))['data']
+                )
+            )
+        )['data']
 
     def _transform_post(self, posts):
         sposts = []
@@ -106,7 +107,13 @@ class Component(ComponentBase):
         graph = facebook.GraphAPI(access_token=self.params[KEY_API_TOKEN])
         comments = []
         for post in posts:
-            for comment in graph.get_all_connections(post['id'], 'comments', filter='stream', fields='id,created_time,permalink_url,from,parent{id},message,like_count', order='reverse_chronological'):
+            for comment in graph.get_all_connections(
+                post['id'],
+                'comments',
+                filter='stream',
+                fields='id,created_time,permalink_url,from,parent{id},message,like_count',
+                order='reverse_chronological'
+            ):
                 scomment = {}
                 scomment['id'] = "%s_%s" % (self.params[KEY_PAGE_ID], comment['id'])
                 scomment['source'] = 'facebook'
@@ -153,6 +160,7 @@ class Component(ComponentBase):
             writer.writeheader()
             writer.writerows(comments)
         self.write_manifest(table_comments)
+
 
 if __name__ == "__main__":
     try:
