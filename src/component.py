@@ -4,6 +4,9 @@ Template Component main class.
 '''
 import csv
 import logging
+import facebook
+import json
+import sys
 from datetime import datetime
 
 from keboola.component.base import ComponentBase
@@ -11,71 +14,146 @@ from keboola.component.exceptions import UserException
 
 # configuration variables
 KEY_API_TOKEN = '#api_token'
-KEY_PRINT_HELLO = 'print_hello'
+KEY_PAGE_ID = 'page_id'
 
 # list of mandatory parameters => if some is missing,
 # component will fail with readable message on initialization.
-REQUIRED_PARAMETERS = [KEY_PRINT_HELLO]
+REQUIRED_PARAMETERS = [KEY_API_TOKEN, KEY_PAGE_ID]
 REQUIRED_IMAGE_PARS = []
 
+FILENAME_POSTS = "posts.csv"
+FILENAME_COMMENTS = "comments.csv"
+
+CSV_FIELDS = [
+    "id",
+    "image_url",
+    "title",
+    "sentiment",
+    "react_haha",
+    "react_anger",
+    "parent_id",
+    "resource",
+    "react_share",
+    "content",
+    "react_sorry",
+    "language",
+    "author",
+    "url",
+    "source",
+    "react_wow",
+    "react_like",
+    "react_love",
+    "published_at",
+    "in_reply_to"
+]
 
 class Component(ComponentBase):
-    """
-        Extends base class for general Python components. Initializes the CommonInterface
-        and performs configuration validation.
-
-        For easier debugging the data folder is picked up by default from `../data` path,
-        relative to working directory.
-
-        If `debug` parameter is present in the `config.json`, the default logger is set to verbose DEBUG mode.
-    """
-
     def __init__(self):
         super().__init__()
 
-    def run(self):
-        '''
-        Main execution code
-        '''
+    def _get_page_name(self):
+        return (
+            facebook.GraphAPI(
+                access_token=self.params[KEY_API_TOKEN],
+                version="2.12"
+            ).get_object(
+                "%s" % (self.params[KEY_PAGE_ID])
+            )
+        )['name']
 
-        # ####### EXAMPLE TO REMOVE
-        # check for missing configuration parameters
+    def _get_posts(self):
+        # @todo: Is paging relevant for us?
+        return (
+            facebook.GraphAPI(
+                access_token=self.params[KEY_API_TOKEN],
+                version="2.12"
+            ).get_object(
+                '/%s/posts' % (self.params[KEY_PAGE_ID]),
+                fields="id,created_time,message,permalink_url,"
+                    "insights.metric(post_reactions_by_type_total).period(lifetime)"
+                    ".as(post_reactions_by_type_total),shares,full_picture"
+        ))['data']
+
+    def _transform_post(self, posts):
+        sposts = []
+        for post in posts:
+            spost = {}
+            spost['id'] = post['id']
+            spost['source'] = 'facebook'
+            spost['resource'] = self.page_name
+            spost['url'] = post['permalink_url']
+            spost['content'] = post.get('message', '')
+            spost['published_at'] = post['created_time'][:-5] + 'Z'
+            spost['author'] = self.page_name
+            spost['image_url'] = post.get('full_picture', '')
+
+            spost['title'] = None
+            spost['parent_id'] = None
+            spost['language'] = "missing"
+            spost['sentiment'] = "missing"
+
+            spost['react_share'] = post.get('shares', {'count': 0})['count']
+            if 'post_reactions_by_type_total' in post:
+                for reaction in ['like', 'love', 'wow', 'haha', 'sorry', 'anger']:
+                    spost['react_%s' % (reaction)] = \
+                        post['post_reactions_by_type_total']['data'][0]['values'][0]['value'].get(reaction, 0)
+
+            sposts.append(spost)
+
+        return sposts
+
+    def _get_comments(self, posts):
+        graph = facebook.GraphAPI(access_token=self.params[KEY_API_TOKEN])
+        comments = []
+        for post in posts:
+            for comment in graph.get_all_connections(post['id'], 'comments', filter='stream', fields='id,created_time,permalink_url,from,parent{id},message,like_count', order='reverse_chronological'):
+                scomment = {}
+                scomment['id'] = "%s_%s" % (self.params[KEY_PAGE_ID], comment['id'])
+                scomment['source'] = 'facebook'
+                scomment['resource'] = self.page_name
+                scomment['url'] = comment['permalink_url']
+                scomment['content'] = comment['message']
+                scomment['react_like'] = comment['like_count']
+                scomment['published_at'] = comment['created_time'][:-5] + 'Z'
+                scomment['author'] = comment['from']['name'] if 'from' in comment else 'N/A'
+
+                if 'parent' in comment:
+                    scomment['in_reply_to'] = "%s_%s" % (self.params[KEY_PAGE_ID], comment['parent']['id'])
+                else:
+                    scomment['in_reply_to'] = post['id']
+
+                scomment['language'] = "missing"
+                scomment['sentiment'] = "missing"
+
+                comments.append(scomment)
+
+        return comments
+
+    def run(self):
         self.validate_configuration_parameters(REQUIRED_PARAMETERS)
         self.validate_image_parameters(REQUIRED_IMAGE_PARS)
-        params = self.configuration.parameters
-        # Access parameters in data/config.json
-        if params.get(KEY_PRINT_HELLO):
-            logging.info("Hello World")
+        self.params = self.configuration.parameters
 
-        # get last state data/in/state.json from previous run
-        previous_state = self.get_state_file()
-        logging.info(previous_state.get('some_state_parameter'))
+        table_posts = self.create_out_table_definition(FILENAME_POSTS, incremental=True, primary_key=['id'])
+        table_comments = self.create_out_table_definition(FILENAME_COMMENTS, incremental=True, primary_key=['id'])
 
-        # Create output table (Tabledefinition - just metadata)
-        table = self.create_out_table_definition('output.csv', incremental=True, primary_key=['timestamp'])
+        self.page_name = self._get_page_name()
 
-        # get file path of the table (data/out/tables/Features.csv)
-        out_table_path = table.full_path
-        logging.info(out_table_path)
+        posts = self._transform_post(self._get_posts())
+        comments = self._get_comments(posts)
 
-        # DO whatever and save into out_table_path
-        with open(table.full_path, mode='wt', encoding='utf-8', newline='') as out_file:
-            writer = csv.DictWriter(out_file, fieldnames=['timestamp'])
+        with open(table_posts.full_path, mode='wt', encoding='utf-8', newline='') as out_file:
+            writer = csv.DictWriter(out_file, fieldnames=CSV_FIELDS)
             writer.writeheader()
-            writer.writerow({"timestamp": datetime.now().isoformat()})
+            writer.writerows(posts)
+        self.write_manifest(table_posts)
 
-        # Save table manifest (output.csv.manifest) from the tabledefinition
-        self.write_manifest(table)
+        with open(table_comments.full_path, mode='wt', encoding='utf-8', newline='') as out_file:
+            writer = csv.DictWriter(out_file, fieldnames=CSV_FIELDS)
+            writer.writeheader()
+            writer.writerows(comments)
+        self.write_manifest(table_comments)
 
-        # Write new state - will be available next run
-        self.write_state_file({"some_state_parameter": "value"})
-
-        # ####### EXAMPLE TO REMOVE END
-
-
-"""
-        Main entrypoint
-"""
 if __name__ == "__main__":
     try:
         comp = Component()
