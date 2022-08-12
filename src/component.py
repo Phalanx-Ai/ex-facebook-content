@@ -147,7 +147,7 @@ class Component(ComponentBase):
             posts = self._transform_post(self._get_posts())
             comments = self._get_comments(posts)
         except facebook.GraphAPIError as error:
-            print (error)
+            print(error)
             sys.exit(1)
 
         with open(table_posts.full_path, mode='wt', encoding='utf-8', newline='') as out_file:
