@@ -1,10 +1,7 @@
-'''
-Template Component main class.
-
-'''
 import csv
 import logging
 import facebook
+import sys
 
 from keboola.component.base import ComponentBase
 from keboola.component.exceptions import UserException
@@ -144,10 +141,14 @@ class Component(ComponentBase):
         table_posts = self.create_out_table_definition(FILENAME_POSTS, incremental=True, primary_key=['id'])
         table_comments = self.create_out_table_definition(FILENAME_COMMENTS, incremental=True, primary_key=['id'])
 
-        self.page_name = self._get_page_name()
+        try:
+            self.page_name = self._get_page_name()
 
-        posts = self._transform_post(self._get_posts())
-        comments = self._get_comments(posts)
+            posts = self._transform_post(self._get_posts())
+            comments = self._get_comments(posts)
+        except facebook.GraphAPIError as error:
+            print (error)
+            sys.exit(1)
 
         with open(table_posts.full_path, mode='wt', encoding='utf-8', newline='') as out_file:
             writer = csv.DictWriter(out_file, fieldnames=CSV_FIELDS)
