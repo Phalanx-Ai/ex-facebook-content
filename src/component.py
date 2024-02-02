@@ -49,8 +49,7 @@ class Component(ComponentBase):
     def _get_page_name(self):
         return (
             facebook.GraphAPI(
-                access_token=self.params[KEY_API_TOKEN],
-                version="2.12"
+                access_token=self.params[KEY_API_TOKEN]
             ).get_object(
                 "%s" % (self.params[KEY_PAGE_ID])
             )
@@ -60,10 +59,9 @@ class Component(ComponentBase):
         # @todo: Is paging relevant for us?
         return (
             facebook.GraphAPI(
-                access_token=self.params[KEY_API_TOKEN],
-                version="2.12"
+                access_token=self.params[KEY_API_TOKEN]
             ).get_object(
-                '/%s/posts' % (self.params[KEY_PAGE_ID]),
+                '%s/posts' % (self.params[KEY_PAGE_ID]),
                 fields=(
                     "id,created_time,message,permalink_url,"
                     "insights.metric(post_reactions_by_type_total).period(lifetime)"
