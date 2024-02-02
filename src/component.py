@@ -102,6 +102,10 @@ class Component(ComponentBase):
         graph = facebook.GraphAPI(access_token=self.params[KEY_API_TOKEN])
         comments = []
         for post in posts:
+            # @workaround: skip older comments (permission issues)
+            if (post['published_at'] < '2024-01-04'):
+                continue
+
             for comment in graph.get_all_connections(
                 post['id'],
                 'comments',
